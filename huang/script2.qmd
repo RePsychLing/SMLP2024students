@@ -1,0 +1,173 @@
+---
+title: "ratingML"
+format: html
+editor: visual
+---
+
+## Ratings
+
+The dataset includes rating data on a free scale from 0-100 on audio recordings of a regio-dialect where certain acoustic features including the word position and place of articulation (POA) are manipulated.
+
+DV: rating
+
+IVs: word position, condition (POA), other demographic info: Age+Gender+Education+VienneseDistrict
+
+random Vs: subject, word
+
+List of analysis concerns:
+
+1.  model selection because the transformed data do not follow gaussian in lme or poisson distribution in glm. The data are closer to negative binomial but the model never finishes running using glm.nb() in MASS.
+How to include the demographic info into the model to predict the ratings besides the main fixed factors of interest.
+I tried with a fully-specified model with all demo factors but it did not converge (last line of the following R chunk).
+
+2.  random effect structure - how can we use the data to find out which random structure we should use?
+3. plots of interactions of partial effects - the interaction is not transparent to inspect from the graphs
+4. model diagnostics
+5. power statistics
+
+## Code chunks
+
+The following are some r codes showing the data prepration, plots of distributions and lmer analyses.
+
+```{r}
+library(tidyverse)
+library(wesanderson)
+library(lme4)
+library(lmerTest)
+library(MASS)
+
+df.all <- read_csv("data2.csv")%>%
+  mutate(rating = Rating, position=matchedPosition)
+
+# norm rating based on max-min
+df.all <- df.all%>%group_by(id)%>%mutate(min.rating=min(rating),max.rating=max(rating))%>%
+  mutate(norm.rating = (rating-min.rating)/(max.rating-min.rating))
+
+# trim
+df.all <- df.all%>%group_by(id)%>%mutate(m.rating=mean(norm.rating),
+                                 sd.rating=sd(norm.rating))%>%
+                                     mutate(z.rating = (norm.rating - m.rating)/sd.rating) %>%
+                                     filter(z.rating > -2.5, z.rating < 2.5)
+df <- df.all%>%filter(MeidlingerLKnown=='AO01') #Ja
+
+
+# graphs  
+df%>%ggplot(aes(x=condition,y=norm.rating))+geom_violin()+facet_grid(~position)
+
+hist(df$norm.rating[df$condition=='ALV'])
+hist(df$norm.rating[df$condition=='RET'])
+hist(df$norm.rating[df$condition=='VLZ'])
+
+df%>%ggplot(aes(x=position,y=norm.rating))+geom_violin()+facet_grid(~condition)
+df%>%ggplot(aes(x=position,y=norm.rating))+geom_bar(stat = 'identity')+facet_grid(~condition)
+df%>%ggplot(aes(x=condition,y=norm.rating))+
+  geom_bar(stat = 'identity')+facet_grid(~position)+facets
+
+
+df%>%group_by(condition,position,id)%>%summarize(mean.rating = mean(norm.rating),
+                                              sd.rating=sd(norm.rating))%>%
+  ggplot(aes(x=condition, y=mean.rating, fill=factor(condition,labels = c("Alveolar","Retroflex","Velarized"))))+
+  geom_col(width=.9, alpha=.9)+facets+
+  facet_wrap(~factor(position,levels=c('Initial','Medial','Final','Syllabic')))+
+  xlab("Variant")+ylab('Avg. rating')+labs(fill="Variant")
+
+mean_ci <- function(x){
+  m = mean(x,na.rm=T)
+  se = sd(x,na.rm=T)/sqrt(length(x))
+  ql = qnorm(1-0.025)
+  c('y'=m, 'ymin'=m-ql*se, 'ymax'=m+ql*se)
+}
+
+# avg.rating in condition x position
+df%>%group_by(condition,position)%>%summarize(mean.rating = mean(norm.rating),
+                                                 sd.rating=sd(norm.rating))%>%
+  ggplot(aes(x=factor(condition,labels = c("Alveolar","Retroflex","Velarized")), y=mean.rating, fill=condition))+
+  geom_col(width=.9, alpha=.9)+facets+
+  facet_wrap(~factor(position,levels=c('Initial','Medial','Final','Syllabic')))+
+  xlab("Variant")+ylab('Avg. rating')+labs(fill="Variant")+
+  theme(legend.position = 'none')
+
+# avg.rating in condition + se.position
+ggplot(df %>% group_by(condition,position)%>%
+         summarize(mean.rating = mean(norm.rating),sd.rating=sd(norm.rating)),
+       aes(x=factor(condition,labels = c("Alveolar","Retroflex","Velarized")), fill=condition, y=mean.rating))+
+  stat_summary(fun.y = mean, 
+               geom="bar")+
+  stat_summary(fun.data = mean_se,
+               geom="errorbar", 
+               width=0.5)+facets+xlab("Variant")+ylab('Avg. rating')+
+theme(legend.position = 'none',aspect.ratio = .8)
+
+# boxplot/violin of all data
+df %>%
+  ggplot(aes(x=factor(condition,labels = c("Alveolar","Retroflex","Velarized")), y=norm.rating,fill=factor(condition,labels = c("Alveolar","Retroflex","Velarized"))))+
+  geom_boxplot(alpha=0.7,width=.7)+
+  #geom_violin(alpha=0.7,scale = "width")+
+  #geom_jitter(height=0,width=0.05,size=.3)+
+  stat_summary(fun.data = mean_ci,
+               geom="pointrange", 
+               fatten = 1.5,
+               position=position_dodge(width=0.9),
+               size=2,shape=21,
+               color="black",
+               fill="white")+facets+
+  xlab("Variant")+ylab('Avg. rating')+theme(legend.position = "none",aspect.ratio = .8)+
+  facet_wrap(~factor(position,levels=c('Initial','Medial','Final','Syllabic')))
+  
+
+
+df%>%group_by(condition,position)%>%summarise(m.rating=mean(rating))
+
+hist(df$norm.rating)
+hist(log10(df$norm.rating))
+
+hist(log(df$rating))
+hist(df$z.rating)
+
+
+df%>%ggplot(aes(x=position,y=z.rating))+geom_violin()+facet_grid(~condition)
+df%>%ggplot(aes(x=position,y=z.rating))+geom_bar(stat = 'identity')+facet_grid(~condition)
+
+
+# stats
+table(df$position,df$condition)
+m1 <- lmer(norm.rating~condition*position + (1|id) +(1|word),data = df)
+#m1 <- glmer(norm.rating~condition*position + (1|id) +(1|word),data = df,family = 'poisson')
+#pchisq(2 * (logLik(m1) - logLik(m3)), df = 1, lower.tail = FALSE)
+
+summary(m1nb <- glmer.nb(norm.rating~condition*position + (1|id) +(1|word),data = df))
+
+summary(m1)
+drop1(m1)
+
+m2 <- lmer(norm.rating~condition+position + (1|id) +(1|word),data = df)
+summary(m2)
+drop1(m2)
+
+anova(m1,m2)
+
+m3 <- lmer(norm.rating~condition*position + (condition||id) +(1|word),data = df)
+with(m3@optinfo$derivs,max(abs(solve(Hessian,gradient)))<2e-3)#T
+
+summary(m3)
+drop1(m3)
+anova(m1,m2,m3)
+
+m4 <- lmer(norm.rating~condition+position + (condition||id) +(1|word),data = df)
+with(m4@optinfo$derivs,max(abs(solve(Hessian,gradient)))<2e-3)#F
+
+summary(m4)
+drop1(m4)
+anova(m1,m2,m3,m4)
+
+# interaction+condition, no position effects
+# use m3
+
+# correlations between demographics & ratings
+colnames(df)
+
+# consider demo factors
+m3n <- lmer(norm.rating~condition*position+Age+Gender+Education+VienneseDistrict+ (condition||id) +(1|word),data = df)
+
+```
+

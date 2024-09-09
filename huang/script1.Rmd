@@ -1,0 +1,285 @@
+---
+title: "pd_distribution"
+author: "Yaqian Huang"
+date: "2023-09-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+
+
+```
+
+## Load, tidy, and code the dataset
+
+The dataset includes the counts of pd and fry - two types of voicing. These counts are logged from different phrasal positions in sentences with a fixed carrier and different sentence-medial compound stimuli.
+
+The DV is the count data; the IVs are different lexical tones, phrasal positions, and types of voicing. Random variables include subject, and the interaction between subject and each of the IVs.
+
+The following sections include the analyses of the distribution of the counts as a function of tone in the compound stimuli and as a function of phrasing and tone across the entire sentence, and the plots showing the distributions.
+
+The list of at most five analysis or modeling issues that are of primary concern:
+
+-   specification of random-effect structure supported by data (convergence issues if include all; added optimizer)
+
+-   model selection between a nested random effects and varying slopes and intercepts
+
+-   plots of interactions of partial effects between tone and phrasing on count
+
+-   model diagnostics
+
+-   power statistics
+
+```{r loaddf, warning=F,message=F}
+
+pros <- read_csv("data1.csv")
+
+# filter out derived neutral tone in sentence-medial stimuli
+pros <- pros[!(pros$Tone=='0'&pros$Phrase%in%c('PM','PI','PF')),]
+
+pros <- pros %>% mutate(id = str_sub(Filename,start=5,end=6),
+               gender = ifelse(str_sub(Filename,start=3,end=3)=="0",'Women','Men'))
+
+pros$ind <- paste0(ifelse(pros$gender=='Women','f','m'),pros$id)
+
+pros$group[pros$Phrase%in%c('PM','PI','PF')] <- 'Medial'
+pros$group[pros$Phrase%in%c('UI','PS1','PS2')] <- 'Initial'
+pros$group[pros$Phrase%in%c('AS2','AS1','UF','AS')] <- 'Final'
+
+pros$Phrase[pros$Phrase%in%c('AS2','AS1','AS')] <- 'AS'
+
+pros$Phrase <- factor(pros$Phrase,
+                      levels = c('UI','PS2','PS1','PI','PM','PF','AS','UF'))
+
+pros$Type[pros$Type=='pd'] = 'period doubling'
+pros$Type[pros$Type=='fry'] <- 'vocal fry'
+
+pros$group <- factor(pros$group, levels = c("Initial", "Medial", "Final"))
+
+pros_style <- list(
+  scale_color_manual(values = c('darkorange1','cornflowerblue','azure4')),#BBBBBB
+  scale_fill_manual(values = c('darkorange1','cornflowerblue','azure4')),#009988
+  theme_light(base_size = 20),
+  theme(
+    aspect.ratio     = .75,
+    legend.text = element_text(size = 22),
+    strip.background = element_blank(),
+    strip.text       = element_text(color = "black",size=18, hjust = 0),
+    strip.placement = 'inside',
+    panel.border     = element_rect(color = "black", fill = NA),
+    legend.position = "bottom",
+    legend.title = element_text(size=22),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size=18)
+  )
+)
+```
+
+## Tone models sentence-medially
+
+```{r tmodels, cache=T, warning=F,message=F}
+
+tone.by.ph <- pros %>% filter(Phrase%in%c('PI','PM','PF'))%>%
+  group_by(Type,Phrase,Tone,ind)%>%summarise(count=n())
+
+tone.by.ph$Tone <- factor(tone.by.ph$Tone, levels = c("1", "2", "3",'4'), 
+                    labels = c("T1", "T2", "T3",'T4'))
+
+tone.by.ph$Type <- factor(tone.by.ph$Type, levels = c( "period doubling", "vocal fry"))
+
+tm.pd <- glmer(count~Type*(Tone+Phrase)+Tone:Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Type)+(1|ind:Phrase)
+               ,data=tone.by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+drop1(tm.pd,test='Chisq',trace = T)
+summary(tm.pd)
+
+#control=lmerControl(optimizer="nloptwrap", optCtrl=list(xtol_abs=1e-8, ftol_abs=1e-8)))
+
+tm.pd2 <- glmer(count~Type*Tone*Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Type)+(1|ind:Phrase)
+               ,data=tone.by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+summary(tm.pd2)
+drop1(tm.pd2,test='Chisq',trace = T)
+anova(tm.pd,tm.pd2)
+
+# tm.pd3 <- glmer(count~Type*Tone*Phrase+(1|ind)+(Tone|ind)+(Type|ind)+(Phrase|ind)
+#                ,data=tone.by.ph,family = 'poisson',
+#                control=lmerControl(optimizer="bobyqa"))
+# summary(tm.pd3)
+# tm.pd4 <- glmer(count~Type*(Tone+Phrase)+Tone:Phrase+(1|ind)+(Tone|ind)+(Type|ind)+(Phrase|ind)
+#                ,data=tone.by.ph,family = 'poisson',
+#                control=lmerControl(optimizer="bobyqa"))
+# summary(tm.pd4)
+
+#tm.pd2@optinfo$conv$lme4
+#with(tm.pd@optinfo$derivs,max(abs(solve(Hessian,gradient)))<2e-3)
+#tm.pd@optinfo$derivs %>% with(. , solve(Hessian, gradient))  %>% abs() %>% max()
+
+tm <- glmer(count~Tone+Phrase+Type+(1|ind)+(1|ind:Tone)+(1|ind:Type)+(1|ind:Phrase),
+             data=tone.by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+drop1(tm,test='Chisq', trace=T)
+
+summary(tm.pd)
+
+
+# refit the model for vocal fry as default
+
+tone.by.ph$Type <- factor(tone.by.ph$Type, levels = c( "vocal fry", "period doubling"))
+
+tm.vf <- glmer(count~Type*(Tone+Phrase)+Tone:Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Type)+(1|ind:Phrase)
+               ,data=tone.by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+
+summary(tm.vf)
+
+tm.vf2 <- glmer(count~Type*Tone*Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Type)+(1|ind:Phrase)
+               ,data=tone.by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+summary(tm.vf2)
+drop1(tm.vf2,test='Chisq',trace = T)
+anova(tm.vf,tm.vf2)
+
+
+
+```
+
+## Plot of tonal distributions
+
+```{r tplot, warning=F,message=F}
+pros.tone.ph <- pros %>%filter(group=='Medial')%>%group_by(Type)%>%
+  mutate(type.n = n())%>%
+  filter(group=='Medial')%>%group_by(Type,Tone,Phrase)%>%
+  mutate(ph.n = n())%>%group_by(Type,Tone,Phrase)%>%
+  summarize(Proportion=ph.n/type.n)%>%unique()
+
+pros.tone.ph$Tone <- factor(pros.tone.ph$Tone, levels = c("1", "2", "3",'4'), 
+                    labels = c("Tone 1 (55)", "Tone 2 (35)", "Tone 3 (21[4])",'Tone 4 (51)'))
+
+pros.tone <- pros %>% filter(group=='Medial')
+pros.tone$Tone <- factor(pros.tone$Tone, levels = c("1", "2", "3",'4'), 
+                    labels = c("Tone 1 (55)", "Tone 2 (35)", "Tone 3 (21[4])",'Tone 4 (51)'))
+
+
+pros.tone%>%group_by(Type,Tone)%>%
+  summarize(n = n())%>%
+  mutate(Proportion=prop.table(n))%>%ggplot()+
+  geom_histogram(aes(x=Type,y=Proportion,fill=Type,group=Type),size = 1,
+           stat = 'identity', position = position_dodge(),
+                 alpha=.3,color='black')+ #alpha=0
+  facet_grid(~Tone)+pros_style+theme(axis.text.x = element_blank(),aspect.ratio = 1)+ylim(c(0, 0.6))
+
+
+pros.tone.ph %>% ggplot()+
+  geom_bar(aes(x=Phrase,y=Proportion,fill=Type,group=Type),size = 1,
+           stat = 'identity', position = position_dodge(),
+                 alpha=.3,color='black')+ #alpha=0
+  facet_grid(~Tone)+pros_style+theme(aspect.ratio = 1)
+
+```
+
+## Phrasing models across the utterance
+
+```{r pmodels, cache=T, warning=F,message=F}
+
+by.ph <- pros%>%group_by(Type,Phrase,Tone,ind)%>%summarise(count=n())
+
+by.ph$Tone <- factor(by.ph$Tone, levels = c("1", "2", "3",'4','0'), 
+                    labels = c("T1", "T2", "T3",'T4','T0'))
+
+by.ph$Type <- factor(by.ph$Type, levels = c( "period doubling", "vocal fry"))
+
+pm.pd <- glmer(count~Tone+Type*Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Phrase)+(1|ind:Type),data=by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+
+with(pm.pd@optinfo$derivs,max(abs(solve(Hessian,gradient)))<2e-3)
+
+drop1(pm.pd,test='Chisq',trace = T)
+
+pm <- glmer(count~Tone+Type+Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Phrase)+(1|ind:Type),data=by.ph,family = 'poisson')
+drop1(pm,test='Chisq',trace = T)
+
+summary(pm.pd)
+
+# refit the model for vocal fry as default
+by.ph$Type <- factor(by.ph$Type, levels = c( "vocal fry", "period doubling"))
+
+pm.vf <- glmer(count~Tone+Type*Phrase+(1|ind)+(1|ind:Tone)+(1|ind:Phrase)+(1|ind:Type),data=by.ph,family = 'poisson',
+               control=lmerControl(optimizer="bobyqa"))
+
+summary(pm.vf)
+
+
+```
+
+## Plot of phrasal distribution
+
+```{r pplots, warning=F,message=F}
+
+pros %>%filter()%>%group_by(Type,Phrase)%>%
+  summarize(n = n())%>%
+  mutate(Proportion=prop.table(n)) %>% ggplot()+
+  geom_bar(aes(x=Phrase,y=Proportion,group=Type,fill=Type),stat = 'identity',alpha=0.3,
+           color='black',
+                 size=1,
+                 position = position_dodge())+
+  pros_style+theme(aspect.ratio = .6)+ylim(c(0, 0.5))
+
+pros %>%filter(Type=='period doubling')%>%group_by(Type,Phrase)%>%
+    summarize(n = n())%>%
+    mutate(Proportion=prop.table(n)) %>% ggplot()+
+    geom_bar(aes(x=Phrase,y=Proportion,group=Type,fill=Type),stat = 'identity',alpha=.3,
+             color='black',
+             size=.8, width=.5,
+             position = position_dodge())+pros_style+theme(aspect.ratio = .3)
+
+pros %>%#group_by(Type,Phrase)%>%
+  #summarize(n = n())%>%
+  #mutate(Proportion=prop.table(n)) %>%
+  ggplot()+
+  geom_density(aes(x=Phrase,group=Type,fill=Type),stat = 'count',alpha=0.3,
+           color='black')+
+  pros_style+theme(aspect.ratio = .6)
+
+```
+
+```{r}
+pros$Phrase <- as.character(pros$Phrase)
+
+pros$Phrase[pros$Phrase=='PM'] = 'syll2'
+pros$Phrase[pros$Phrase=='PI'] = 'syll1'
+pros$Phrase[pros$Phrase=='PF'] = 'syll3'
+pros$Phrase[pros$Phrase=='UI'] = 'I'
+pros$Phrase[pros$Phrase=='PS2'] = 'teach'
+pros$Phrase[pros$Phrase=='PS1'] = 'you'
+pros$Phrase[pros$Phrase=='AS'] = 'how-to'
+pros$Phrase[pros$Phrase=='UF'] = 'say'
+
+pros$Phrase <- factor(pros$Phrase,
+                      levels = c('I','teach','you','syll1','syll2','syll3','how-to','say'))
+
+
+pros %>%filter(Type=='period doubling')%>%group_by(Type,Phrase)%>%
+  summarize(n = n())%>%
+  mutate(Proportion=prop.table(n)) %>% ggplot()+
+  geom_bar(aes(x=Phrase,y=Proportion,group=Type,fill=Type),stat = 'identity',alpha=0.3,
+           color='black',
+                 size=1, width=.45, just=1,
+                 position = position_dodge())+
+  pros_style+theme(aspect.ratio = .6)+ylim(c(0, 0.5))
+
+pros %>% group_by(Type,Phrase)%>%
+  summarize(n = n())%>%
+  mutate(Proportion=prop.table(n)) %>% filter(Type=='vocal fry') %>% ggplot()+
+  geom_bar(aes(x=Phrase,y=Proportion,group=Type,fill=Type),stat = 'identity',alpha=0.3,
+           color='black',
+           size=1,
+           width=0.45,just=0,
+           position = position_dodge())+  scale_fill_discrete(drop=FALSE) +
+  scale_x_discrete(drop=FALSE)+
+  pros_style+theme(aspect.ratio = .6)+ylim(c(0, 0.5))
+```
