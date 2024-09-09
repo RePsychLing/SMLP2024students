@@ -22,3 +22,17 @@ docs/site/
 # committed for packages, but should be committed for applications that require a static
 # environment.
 Manifest.toml
+
+# mac gunk
+__MACOSX
+.DS_Store
+
+# ide gunk
+.vscode
+*\~
+*.swp
+
+# build products
+*_files/
+*.html
+

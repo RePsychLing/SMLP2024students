@@ -1,0 +1,93 @@
+---
+title: "Data Analysis for Russian MoTR Reading Data"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Thank you very much for reading this script!
+
+We collected Russian Mouse Tracking for Reading data (MoTR) following an eye-tracking study (Fuchs et al., resubmitted) who investigated this research question using Russian: Do grammaticality effects interact with agreement type (internal vs external) or do grammaticality effects interact with lexical type (adj vs verb) instead?
+
+* MoTR data are similar to ET data, we extracted gaze duration, go past time, total duration, regressions etc. from the x,y screen coordinates.
+
+On the one hand, we wanted to test the validaty of MoTR to see whether it can replicate the findings by Fuchs et al. in eye-tracking. On the other hand, we wanted to study further "Do grammaticality effects interact with agreement type (internal vs external) or do grammaticality effects interact with lexical type (adj vs verb) instead?"
+
+We have three types of matches in Russian. Note, all the AOI words are in the same position in a sentence. The AOI word (modifying adj, predictive adk, or verb) will try to match the gender of the noun by its morpheme. When they match each other, it is grammatical, otherwise, ungrammatical:
+
+1. modifying adj + noun  
+2. predictive adj + noun 
+3. verb + noun
+
+The tricky part is that predictive adj can belong to adjective, then by looking at  1 + 2 vs 3, we can examine "do grammaticality effects interact with lexical type (adj vs verb)?"
+
+Predictive adj can also belong to external agreement, then by looking at 1 vs 2 + 3, we can examine "do grammaticality effects interact with agreement type (internal vs external)?"
+
+Here comes the question -- how to analyze the data (or specifically, do the contrast coding) to find the answer to the question? i.e., to know whether agreement type or lexical type modulate grammaticality. --> Yes, we followed Fuchs et al. to collect the data and we can also just follow them to analyze the data, but I don't think their data analysis was answering the research quesiton. They used sum constrast coding for everything. I feel it is not correct.
+
+Second question -- can we do model comparison or selection as well? For example, one model encoding the interaction with agreement type, one encoding the interaction with lexical type.
+
+
+
+## variables needed for the analyses 
+The dependent variables are the reading measures --  let take "go_past_time" as an example
+
+The predictors are :  Grammaiticality,  Gender,  Lexical type, Agreement type, Grammaticality_x_Lexical type,  Grammaticality_x_Agreement type,  Grammaticality_x_Gender_x_Lexical type, Grammaticality_x_Gender_x_Agreement type.
+
+Random effects for item and subjects are also included.
+
+
+```{r summary statistics}
+motr_data <- read.csv("./MoTR_data_go_past_time.csv")
+
+
+motr_data$Gram <- as.factor(motr_data$Gram)
+motr_data$Gen <- as.factor(motr_data$Gen)
+motr_data$TypL <- as.factor(motr_data$TypL)
+motr_data$TypS <- as.factor(motr_data$TypS)
+
+summary_stats_wide <- motr_data %>%
+  summarise(
+    subj_id_count = n_distinct(subj_id),     # Number of unique subjects
+    item_id_count = n_distinct(item_id),     # Number of unique items
+    mean_go_past_time = mean(go_past_time, na.rm = TRUE),  # Mean of 'go_past_time'
+    median_go_past_time = median(go_past_time, na.rm = TRUE),  # Median of 'go_past_time'
+    sd_go_past_time = sd(go_past_time, na.rm = TRUE),      # Standard deviation of 'go_past_time'
+    min_go_past_time = min(go_past_time, na.rm = TRUE),    # Minimum 'go_past_time'
+    max_go_past_time = max(go_past_time, na.rm = TRUE),    # Maximum 'go_past_time'
+    codes_Gram = paste(levels(Gram), collapse = ", "), # Levels of 'Gram'
+    codes_Gen = paste(levels(Gen), collapse = ", "),   
+    codes_TypL = paste(levels(TypL), collapse = ", "), 
+    codes_TypS = paste(levels(TypS), collapse = ", "),
+    codes_Gram_x_TypL = paste(levels(Gram_x_TypL), collapse = ", "),
+    codes_Gram_x_TypS = paste(levels(Gram_x_TypS), collapse = ", "),
+    codes_Gram_x_Gen_x_TypL = paste(levels(Gram_x_Gen_x_TypL), collapse = ", "),
+    codes_Gram_x_Gen_x_TypS = paste(levels(Gram_x_Gen_x_TypS), collapse = ", ")
+  )
+
+summary_stats_wide <- summary_stats_wide %>% 
+  mutate(across(everything(), as.character))
+
+# Convert the summary_stats from wide to long format (multiple rows)
+summary_stats <- summary_stats_wide %>%
+  pivot_longer(everything(), names_to = "Statistic", values_to = "Value")
+
+print(summary_stats)
+```
+
+```{r model}
+
+model <- lmer(log(go_past_time) ~ Gram + Gen + TypL + TypS + Gram_x_TypL + Gram_x_TypS + Gram_x_Gen_x_TypL + Gram_x_Gen_x_TypS + (1 | item_id) + (1 + Gram | subj_id), data = motr_data , REML = F)
+
+summary(model)
+
+```
+
+
+# The modeling issues I am concerned about are:
+## contrast coding, 
+## model selection, 
+## plots of interactions of partial effects.
+

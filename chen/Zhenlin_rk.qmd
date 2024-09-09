@@ -1,0 +1,97 @@
+---
+title: "AMLP pre-course data"
+output: html_document
+date: "2024-09-05"
+---
+
+This file is the result of
+
+```
+knitr::convert_chunk_header("Zhenlin_rk.Rmd", "Zhenlin_rk.qmd", type="yaml")
+```
+
+```{r}
+#| label: setup
+#| include: false
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+HN_subset <- read.csv("HN_subset.csv")
+```
+
+#(1)Brief description: 
+we collected the EEG data using a rapid serial visual paradigm. We manipulated the congruency of the classifiers (CL) and head nouns (HN) in Chinese sentences to look into the influence of the congruency of classifiers and head nouns on the processing of the head nouns. I need to explain it a bit more: the congruency of the head noun indicate if it is congruent with the sentence context. We are interested in the N400 component on head noun position. The data was recorded at a sampling rate of 512 Hz, with a time window of -200 ms to 800 ms. 
+
+#(2)the variables
+time: the sample time 
+key: the electrode
+value: the amplitude at the sampled time
+participant: the number for each participant 
+item: the number for each item
+CL: the congruency of the classifier
+HN: the congruency of the head noun 
+
+
+#(3)some summary statistics 
+```{r}
+mean_value <- mean(HN_subset$value, na.rm = TRUE)
+median_value <- median(HN_subset$value, na.rm = TRUE)
+sd_value <- sd(HN_subset$value, na.rm = TRUE)
+min_value <- min(HN_subset$value, na.rm = TRUE)
+max_value <- max(HN_subset$value, na.rm = TRUE)
+quantiles <- quantile(HN_subset$value, na.rm = TRUE)
+
+# Printing the results
+cat("Mean:", mean_value, "\n")
+cat("Median:", median_value, "\n")
+cat("Standard Deviation:", sd_value, "\n")
+cat("Minimum:", min_value, "\n")
+cat("Maximum:", max_value, "\n")
+cat("Quantiles:", quantiles, "\n")
+
+#plot 
+hist(HN_subset$value)
+```
+
+
+#(4)LMM model fitting 
+```{r}
+#check the category 
+HN_subset$participant <- factor(HN_subset$participant)
+HN_subset$key <- factor(HN_subset$key)
+HN_subset$item <- factor(HN_subset$item)
+HN_subset$CL <- factor(HN_subset$CL)
+HN_subset$HN <- factor(HN_subset$HN)
+
+library(lme4)
+HNmodel_1 <- lmer(value ~ 1 + participant/(CL*HN) + (1 + CL*HN | item), 
+                  data = HN_subset, REML = FALSE, 
+                  control = lmerControl(calc.derivs=FALSE, optimizer = "bobyqa"))
+summary(rePCA(HNmodel_1))
+VarCorr(HNmodel_1)
+
+
+HNmodel_2 <- lmer(value ~ 1 + participant/(CL*HN) + (1 + CL+HN | item), 
+                  data = HN_subset, REML = FALSE, 
+                  control = lmerControl(calc.derivs=FALSE, optimizer = "bobyqa"))
+summary(rePCA(HNmodel_2))
+VarCorr(HNmodel_2)
+
+anova(HNmodel_2, HNmodel_1)
+
+print(summary(HNmodel_2), cor=FALSE)
+```
+
+
+#(5)a list of at most five analysis or modeling issues
+I am always not comfortable with model selection, which also includes the problem of specification of random-effect structure. I know there are different views on it and there is no golden rule for it. Usually my studies are 2 by 2 experimental design which only include two potential fixed effects, there are already a lot of possibilities that I need to try before I find the best-fitting model with maximal random effect structures.
+What if the adding of the random effects makes the previous significant fixed effects become not significant. In this condition, we need to keep the random effect part maximal. There are a lot of things. I think I need a guide. For example, I have three potential fixed effects that are supported by the theories and everthing. If I want to reduce the model step by step. I can start with: 
+value ~ 1 + A*B*C + (1 + A*B*C | item) + (1 + A*B*C | participant)
+this already will take a very very very long time for the program to run. Then what will be the next step? How many possibilities should I test? Before moving to the next (simpler) possibility, what comparison tests should I do?
+I know Julia has way faster computing speed, which can help with this. I am still not comfortable with the model selection. 
+
+In addition, I need more training in terms of plots of interactions of partial effects, model diagonostics, and power statistics. You know us very well. I am interested in the things you listed!
+
+Last but not least, I want some guidance on how to do the github things. How to make it clear? What should be included? 
