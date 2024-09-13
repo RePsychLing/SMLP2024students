@@ -1,0 +1,127 @@
+---
+title: Näive DL experiment
+engine: julia
+julia:
+  exeflags: ["--project", "--threads=auto"]
+fig-format: png
+format:
+  html:
+    code-overflow: wrap
+---
+
+
+```{julia}
+#| code-fold: true
+using DataFrames
+using CSV
+using MixedModels
+using CairoMakie
+using MixedModelsMakie
+using StatsBase
+using StatsModels
+using StandardizedPredictors
+using Statistics
+```
+
+
+```{julia}
+df = CSV.read("regression_data.csv", DataFrame)
+select!(df, Not(:speechRate))
+describe(df)
+```
+
+Preprocessing.
+```{julia}
+df = filter(:wordDur => value -> value != 0 && value <5, df); 
+df.wordDurLog = log.(df.wordDur);
+filter_pos(x) = x  ∈ ["JJ", "NN", "RB", "V"];
+df = subset(df, :wordPOS => ByRow(filter_pos));
+```
+
+Contrasts.
+```{julia}
+contrasts = Dict(:n_segments => ZScore(),
+                :n_syllables => ZScore(),
+                :activation_context => ZScore(),
+                :activation_syllables => ZScore(),
+                :activation_segments => ZScore(),
+                :activation_all => ZScore(),
+                :prior_context => ZScore(),
+                :prior_syllables => ZScore(),
+                :prior_segments => ZScore(),
+                :prior_all => ZScore(),
+                :global_sr => ZScore(),
+                :speakerGender => DummyCoding(),
+                :interviewerGender => DummyCoding(),
+                :speakerAge => DummyCoding(),
+                :wordPOS => DummyCoding(), 
+                :speakerID => DummyCoding());
+```
+
+Model with all predictors. 
+```{julia}
+all_predictors = [:activation_context, :activation_syllables, :activation_segments, :prior_context, :prior_syllables, :prior_segments];
+predictor_term = mapreduce(term, +, all_predictors);
+base_term = @formula wordDur ~ (1|speakerID) + (1|wordID) + n_segments + n_syllables + speakerGender + interviewerGender + speakerAge + wordPOS + global_sr;
+formula = base_term.lhs ~ base_term.rhs + predictor_term;
+```
+
+
+```{julia}
+mAll = fit(MixedModel, formula, df; contrasts)
+```
+
+```{julia}
+qqnorm(residuals(mAll); qqline=:none)
+```
+
+Functions for model comparison. 
+```{julia}
+function make_formula(base_formula, measures, i, direction)
+    if direction == "bottom_up"
+        formula = base_formula.lhs ~ base_formula.rhs + term(Symbol(measures[i]))
+        return formula
+    elseif direction == "top_down"
+        formula = base_formula.lhs ~ base_formula.rhs + mapreduce(term, +, filter(e->e≠measures[i],measures))
+        return formula
+    else
+        return "Direction parameter must be 'top_down' or 'bottom_up' not $direction."
+    end
+end
+
+function model_building(df; direction, measures)
+    models = Dict()
+    base_formula = @formula(wordDur ~ (1|speakerID) + (1|wordID) + n_segments + n_syllables + speakerGender + interviewerGender + speakerAge + wordPOS + global_sr);
+    
+    for i in eachindex(measures)
+        formula = make_formula(base_formula, measures, i, direction);
+        m = fit(MixedModel, formula, df; contrasts);
+        models[measures[i]] = m
+    end
+    return models
+end
+```
+
+"Top-down" comparison. 
+```{julia}
+measures = ["activation_context", "activation_syllables", "activation_segments", "prior_context", "prior_syllables", "prior_segments"];   
+
+models = model_building(df; direction="top_down", measures = measures);
+res = DataFrame(model = String.(keys(models)), 
+                aic = round.(Int,aic.(values(models))), 
+                bic = round.(Int, bic.(values(models))), 
+                loglikelihood = round.(Int, loglikelihood.(values(models))));
+sort!(res,:aic) # sort according to aic value
+```
+
+"Bottom-up" comparison. 
+```{julia}
+measures = ["activation_context", "activation_syllables", "activation_segments", "prior_context", "prior_syllables", "prior_segments"]; 
+
+models = model_building(df;direction="bottom_up", measures = measures)
+res = DataFrame(model = String.(keys(models)), 
+                aic = round.(Int,aic.(values(models))), 
+                bic = round.(Int, bic.(values(models))), 
+                loglikelihood = round.(Int, loglikelihood.(values(models))));
+sort!(res,:aic)
+```
